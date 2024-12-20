@@ -7,6 +7,6 @@ ESP32S3-Touch-LCD 1.28
 
 ## 数据格式
 ```
-# cpu占用,内存占用,温度
+# 内存占用,磁盘占用,cpu占用
 int,int,int
 ```

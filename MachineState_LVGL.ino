@@ -1,7 +1,9 @@
 #include <lvgl.h>
 #include <TFT_eSPI.h>
 #include "lv_conf.h"
+#include "CST816S.h"
 
+LV_FONT_DECLARE(chinese_7500_char)
 
 /* 屏幕分辨率 */
 static const uint16_t screenWidth = 240;
@@ -30,7 +32,7 @@ void increase_lvgl_tick(void *arg) {
   lv_tick_inc(2);  // 每 2 毫秒增加一次 LVGL 内部时间
 }
 
-void custom_arc_draw_cb_mem(lv_event_t *e) {
+void custom_arc_draw_cb_disk(lv_event_t *e) {
   lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
   // 只处理指示器头部部分
   if (dsc->part == LV_PART_INDICATOR && dsc->type == LV_ARC_DRAW_PART_KNOB) {
@@ -43,35 +45,35 @@ void custom_arc_draw_cb_mem(lv_event_t *e) {
 }
 
 /* 定义全局变量 */
-static lv_obj_t *label_cpu;   // 显示CPU占用
-static lv_obj_t *label_mem;   // 显示内存占用
-static lv_obj_t *label_tmp;   // 显示温度
-static lv_obj_t *arc_cpu;     // 圆环进度条
+static lv_obj_t *label_mem;   // 显示mem占用
+static lv_obj_t *label_disk;   // 显示内存占用
+static lv_obj_t *label_cpu;   // 显示温度
 static lv_obj_t *arc_mem;     // 圆环进度条
-static int progress_cpu = 0;  // 当前进度值
+static lv_obj_t *arc_disk;     // 圆环进度条
 static int progress_mem = 0;  // 当前进度值
-static int progress_tmp = 0;  // 当前进度值
+static int progress_disk = 0;  // 当前进度值
+static int progress_cpu = 0;  // 当前进度值
 
 
 /* 更新进度条和文字 */
-void update_ui(int v_cpu, int v_mem, int v_tmp) {
-  char buf_cpu[16];
-  sprintf(buf_cpu, "CPU: %d%%", v_cpu);
-  lv_label_set_text(label_cpu, buf_cpu);            // 更新文字
-  lv_obj_align(label_cpu, LV_ALIGN_CENTER, 0, 90);  // 保持文字位置
-
+void update_ui(int v_mem, int v_disk, int v_cpu) {
   char buf_mem[16];
-  sprintf(buf_mem, "MEM: %d%%", v_mem);
+  sprintf(buf_mem, "内存: %d%%", v_mem);
   lv_label_set_text(label_mem, buf_mem);            // 更新文字
-  lv_obj_align(label_mem, LV_ALIGN_CENTER, 0, 60);  // 保持文字位置
+  lv_obj_align(label_mem, LV_ALIGN_CENTER, 0, 90);  // 保持文字位置
 
-  char buf_tmp[16];
-  sprintf(buf_tmp, "%d°", v_tmp);
-  lv_label_set_text(label_tmp, buf_tmp);           // 更新文字
-  lv_obj_align(label_tmp, LV_ALIGN_CENTER, 0, 0);  // 保持文字位置
+  char buf_disk[16];
+  sprintf(buf_disk, "SSD: %d%%", v_disk);
+  lv_label_set_text(label_disk, buf_disk);            // 更新文字
+  lv_obj_align(label_disk, LV_ALIGN_CENTER, 0, 60);  // 保持文字位置
 
-  lv_arc_set_value(arc_cpu, v_cpu);  // 更新圆环进度条
+  char buf_cpu[16];
+  sprintf(buf_cpu, "%d%%", v_cpu);
+  lv_label_set_text(label_cpu, buf_cpu);           // 更新文字
+  lv_obj_align(label_cpu, LV_ALIGN_CENTER, 0, 0);  // 保持文字位置
+
   lv_arc_set_value(arc_mem, v_mem);  // 更新圆环进度条
+  lv_arc_set_value(arc_disk, v_disk);  // 更新圆环进度条
 }
 
 /* 串口读取和更新 */
@@ -81,7 +83,7 @@ void read_serial_input() {
     input.trim();                                 // 去掉可能的前后空白字符
     Serial.println("Received: " + input);
 
-    // cpu 内存 温度
+    // 内存 硬盘 CPU
     int values[3] = { 0, 0, 0 };  // 存储三个整数值
     int index = 0;
 
@@ -106,11 +108,11 @@ void read_serial_input() {
     }
 
     // 更新 UI
-    progress_cpu = values[0];
-    progress_mem = values[1];
-    progress_tmp = values[2];
-    update_ui(progress_cpu, progress_mem, progress_tmp);  // 更新 UI
-    Serial.printf("Updated values: %d, %d, %d\n", progress_cpu, progress_mem, progress_tmp);
+    progress_mem = values[0];
+    progress_disk = values[1];
+    progress_cpu = values[2];
+    update_ui(progress_mem, progress_disk, progress_cpu);  // 更新 UI
+    Serial.printf("Updated values: %d, %d, %d\n", progress_mem, progress_disk, progress_cpu);
   }
 }
 
@@ -138,6 +140,42 @@ void setup() {
   lv_obj_t *screen = lv_scr_act();
   lv_obj_set_style_bg_color(screen, lv_color_make(0,0,0), LV_PART_MAIN);
   // =======================================================================================
+  // ============================ 内存 TEXT
+
+  /* 创建并初始化样式 */
+  static lv_style_t style_label_mem;
+  lv_style_init(&style_label_mem);
+
+  /* 设置文字颜色为蓝色 */
+  lv_style_set_text_color(&style_label_mem, lv_color_make(135, 206, 235));
+
+  /* 创建一个标签用于显示文字 */
+  label_mem = lv_label_create(lv_scr_act());
+  lv_obj_set_style_text_font(label_mem, &lv_font_simsun_16_cjk, 0);
+  lv_label_set_text(label_mem, "内存: 0%");
+  lv_obj_align(label_mem, LV_ALIGN_CENTER, 0, 90);
+  /* 应用样式到标签 */
+  lv_obj_add_style(label_mem, &style_label_mem, 0);
+
+  // =======================================================================================
+  // ============================ 硬盘 TEXT
+
+  /* 创建并初始化样式 */
+  static lv_style_t style_label_disk;
+  lv_style_init(&style_label_disk);
+
+  /* 设置文字颜色为蓝色 */
+  lv_style_set_text_color(&style_label_disk, lv_color_make(0, 200, 0));
+
+  /* 创建一个标签用于显示文字 */
+  label_disk = lv_label_create(lv_scr_act());
+  lv_obj_set_style_text_font(label_disk, &lv_font_simsun_16_cjk, 0);
+  lv_label_set_text(label_disk, "SSD: 0%");
+  lv_obj_align(label_disk, LV_ALIGN_CENTER, 0, 60);
+  /* 应用样式到标签 */
+  lv_obj_add_style(label_disk, &style_label_disk, 0);
+
+  // =======================================================================================
   // ============================ CPU TEXT
 
   /* 创建并初始化样式 */
@@ -145,87 +183,20 @@ void setup() {
   lv_style_init(&style_label_cpu);
 
   /* 设置文字颜色为蓝色 */
-  lv_style_set_text_color(&style_label_cpu, lv_color_make(0, 0, 200));
+  lv_style_set_text_color(&style_label_cpu, lv_color_make(255, 165, 0));
 
   /* 创建一个标签用于显示文字 */
   label_cpu = lv_label_create(lv_scr_act());
-  lv_label_set_text(label_cpu, "CPU: 0%");
-  lv_obj_align(label_cpu, LV_ALIGN_CENTER, 0, 90);
+  lv_label_set_text(label_cpu, "n%");
+  lv_obj_align(label_cpu, LV_ALIGN_CENTER, 0, 0);
+
+
+  lv_style_set_text_font(&style_label_cpu, &lv_font_montserrat_46);
   /* 应用样式到标签 */
   lv_obj_add_style(label_cpu, &style_label_cpu, 0);
 
   // =======================================================================================
-  // ============================ MEM TEXT
-
-  /* 创建并初始化样式 */
-  static lv_style_t style_label_mem;
-  lv_style_init(&style_label_mem);
-
-  /* 设置文字颜色为蓝色 */
-  lv_style_set_text_color(&style_label_mem, lv_color_make(0, 200, 0));
-
-  /* 创建一个标签用于显示文字 */
-  label_mem = lv_label_create(lv_scr_act());
-  lv_label_set_text(label_mem, "CPU: 0%");
-  lv_obj_align(label_mem, LV_ALIGN_CENTER, 0, 60);
-  /* 应用样式到标签 */
-  lv_obj_add_style(label_mem, &style_label_mem, 0);
-
-  // =======================================================================================
-  // ============================ TMP TEXT
-
-  /* 创建并初始化样式 */
-  static lv_style_t style_label_tmp;
-  lv_style_init(&style_label_tmp);
-
-  /* 设置文字颜色为蓝色 */
-  lv_style_set_text_color(&style_label_tmp, lv_color_make(255, 165, 0));
-
-  /* 创建一个标签用于显示文字 */
-  label_tmp = lv_label_create(lv_scr_act());
-  lv_label_set_text(label_tmp, "n°");
-  lv_obj_align(label_tmp, LV_ALIGN_CENTER, 0, 0);
-
-
-  lv_style_set_text_font(&style_label_tmp, &lv_font_montserrat_46);
-  /* 应用样式到标签 */
-  lv_obj_add_style(label_tmp, &style_label_tmp, 0);
-
-  // =======================================================================================
-  // ============================ CPU
-
-  // 初始化样式
-  static lv_style_t style_arc_bg_cpu;   // 背景样式
-  static lv_style_t style_arc_ind_cpu;  // 指示器样式
-
-  lv_style_init(&style_arc_bg_cpu);
-  lv_style_set_arc_width(&style_arc_bg_cpu, 20);                                // 背景宽度
-  lv_style_set_arc_color(&style_arc_bg_cpu, lv_palette_main(LV_PALETTE_GREY));  // 背景颜色
-
-  lv_style_init(&style_arc_ind_cpu);
-  lv_style_set_arc_width(&style_arc_ind_cpu, 20);                                // 指示器宽度
-  lv_style_set_arc_color(&style_arc_ind_cpu, lv_palette_main(LV_PALETTE_BLUE));  // 指示器颜色
-
-  /* 创建圆环进度条 */
-  arc_cpu = lv_arc_create(lv_scr_act());
-  lv_obj_set_size(arc_cpu, 230, 230);            // 设置圆环大小
-  lv_obj_align(arc_cpu, LV_ALIGN_CENTER, 0, 0);  // 圆环放在屏幕中心
-  lv_arc_set_range(arc_cpu, 0, 100);             // 进度条范围 0-100
-  lv_arc_set_value(arc_cpu, 0);                  // 初始值为 0
-
-  // 应用样式
-  lv_obj_add_style(arc_cpu, &style_arc_bg_cpu, LV_PART_MAIN);        // 背景样式
-  lv_obj_add_style(arc_cpu, &style_arc_ind_cpu, LV_PART_INDICATOR);  // 指示器样式
-
-  // =======================================================================================
-  // =======================================================================================
-  // ============================ MEM
-  /* 创建圆环进度条 */
-  arc_mem = lv_arc_create(lv_scr_act());
-  lv_obj_set_size(arc_mem, 180, 180);            // 设置圆环大小
-  lv_obj_align(arc_mem, LV_ALIGN_CENTER, 0, 0);  // 圆环放在屏幕中心
-  lv_arc_set_range(arc_mem, 0, 100);             // 进度条范围 0-100
-  lv_arc_set_value(arc_mem, 0);                  // 初始值为 0
+  // ============================ 内存
 
   // 初始化样式
   static lv_style_t style_arc_bg_mem;   // 背景样式
@@ -236,9 +207,42 @@ void setup() {
   lv_style_set_arc_color(&style_arc_bg_mem, lv_palette_main(LV_PALETTE_GREY));  // 背景颜色
 
   lv_style_init(&style_arc_ind_mem);
-  lv_style_set_arc_width(&style_arc_ind_mem, 20);                                 // 指示器宽度
-  lv_style_set_arc_color(&style_arc_ind_mem, lv_palette_main(LV_PALETTE_GREEN));  // 指示器颜色
-  lv_style_set_bg_grad_color(&style_arc_ind_mem, lv_palette_main(LV_PALETTE_GREEN));
+  lv_style_set_arc_width(&style_arc_ind_mem, 20);                                // 指示器宽度
+  lv_style_set_arc_color(&style_arc_ind_mem, lv_palette_main(LV_PALETTE_BLUE));  // 指示器颜色
+
+  /* 创建圆环进度条 */
+  arc_mem = lv_arc_create(lv_scr_act());
+  lv_obj_set_size(arc_mem, 230, 230);            // 设置圆环大小
+  lv_obj_align(arc_mem, LV_ALIGN_CENTER, 0, 0);  // 圆环放在屏幕中心
+  lv_arc_set_range(arc_mem, 0, 100);             // 进度条范围 0-100
+  lv_arc_set_value(arc_mem, 0);                  // 初始值为 0
+
+  // 应用样式
+  lv_obj_add_style(arc_mem, &style_arc_bg_mem, LV_PART_MAIN);        // 背景样式
+  lv_obj_add_style(arc_mem, &style_arc_ind_mem, LV_PART_INDICATOR);  // 指示器样式
+
+  // =======================================================================================
+  // =======================================================================================
+  // ============================ 磁盘
+  /* 创建圆环进度条 */
+  arc_disk = lv_arc_create(lv_scr_act());
+  lv_obj_set_size(arc_disk, 180, 180);            // 设置圆环大小
+  lv_obj_align(arc_disk, LV_ALIGN_CENTER, 0, 0);  // 圆环放在屏幕中心
+  lv_arc_set_range(arc_disk, 0, 100);             // 进度条范围 0-100
+  lv_arc_set_value(arc_disk, 0);                  // 初始值为 0
+
+  // 初始化样式
+  static lv_style_t style_arc_bg_disk;   // 背景样式
+  static lv_style_t style_arc_ind_disk;  // 指示器样式
+
+  lv_style_init(&style_arc_bg_disk);
+  lv_style_set_arc_width(&style_arc_bg_disk, 20);                                // 背景宽度
+  lv_style_set_arc_color(&style_arc_bg_disk, lv_palette_main(LV_PALETTE_GREY));  // 背景颜色
+
+  lv_style_init(&style_arc_ind_disk);
+  lv_style_set_arc_width(&style_arc_ind_disk, 20);                                 // 指示器宽度
+  lv_style_set_arc_color(&style_arc_ind_disk, lv_palette_main(LV_PALETTE_GREEN));  // 指示器颜色
+  lv_style_set_bg_grad_color(&style_arc_ind_disk, lv_palette_main(LV_PALETTE_GREEN));
 
   static lv_style_t style_knob;
   lv_style_init(&style_knob);
@@ -246,14 +250,14 @@ void setup() {
   lv_style_set_bg_opa(&style_knob, LV_OPA_COVER);                         // 设置不透明度
 
   // 将样式应用到 Knob 部分
-  lv_obj_add_style(arc_mem, &style_knob, LV_PART_KNOB);
+  lv_obj_add_style(arc_disk, &style_knob, LV_PART_KNOB);
 
 
   // 应用样式
-  lv_obj_add_style(arc_mem, &style_arc_bg_mem, LV_PART_MAIN);        // 背景样式
-  lv_obj_add_style(arc_mem, &style_arc_ind_mem, LV_PART_INDICATOR);  // 指示器样式
+  lv_obj_add_style(arc_disk, &style_arc_bg_disk, LV_PART_MAIN);        // 背景样式
+  lv_obj_add_style(arc_disk, &style_arc_ind_disk, LV_PART_INDICATOR);  // 指示器样式
   // 添加绘制回调
-  lv_obj_add_event_cb(arc_mem, custom_arc_draw_cb_mem, LV_EVENT_DRAW_PART_BEGIN, NULL);
+  lv_obj_add_event_cb(arc_disk, custom_arc_draw_cb_disk, LV_EVENT_DRAW_PART_BEGIN, NULL);
 
   // =======================================================================================
 
